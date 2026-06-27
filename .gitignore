@@ -12,6 +12,11 @@ dist/
 build/
 *.egg-info/
 
+# Excel / data files
+*.xlsx
+*.xls
+*.csv
+
 # OS
 .DS_Store
 Thumbs.db
