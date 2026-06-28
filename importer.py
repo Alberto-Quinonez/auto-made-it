@@ -73,6 +73,7 @@ def _import_bmo(csv_path: str, excel_path: str, bank: BMOConfig) -> str:
             amt = float(row.amount_str)
             last_balance = round(last_balance + amt, 2)
             _copy_row_style(ws, template_row, r, max_col)
+            ws.cell(row=r, column=bank.excel_je).value = None
             ws.cell(row=r, column=bank.excel_card).value = row.card
             ws.cell(row=r, column=bank.excel_type).value = row.tx_type
             ws.cell(row=r, column=bank.excel_date).value = int(row.date_str)
@@ -159,6 +160,7 @@ def _import_desj(csv_path: str, excel_path: str, bank: DESJConfig) -> str:
         for i, row in enumerate(new_rows):
             r = insert_row + i
             _copy_row_style(ws, template_row, r, max_col)
+            ws.cell(row=r, column=bank.excel_je).value = None
 
             bal_cell = ws.cell(row=r, column=bank.excel_balance)
             if row.account_type == "LN1" and grey_fill:
