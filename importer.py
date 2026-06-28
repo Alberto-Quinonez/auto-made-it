@@ -1,10 +1,30 @@
 import csv
 from copy import copy
 from datetime import datetime
+from typing import NamedTuple
 
 import openpyxl
 
 from config import BankConfig, BMOConfig, DESJConfig
+
+
+class _BmoRow(NamedTuple):
+    card: str
+    tx_type: str
+    date_str: str
+    amount_str: str
+    description: str
+
+
+class _DESJRow(NamedTuple):
+    account_type: str
+    date: datetime
+    code: float | None
+    description: str
+    withdrawal: float | None
+    deposit: float | None
+    interest: float | None
+    capital: float | None
 
 
 def import_csv_to_excel(csv_path: str, excel_path: str, bank: BankConfig) -> str:
@@ -29,15 +49,15 @@ def _import_bmo(csv_path: str, excel_path: str, bank: BMOConfig) -> str:
     wb_ro.close()
 
     new_rows, skipped = [], 0
-    for card, tx_type, date_str, amount_str, description in csv_rows:
+    for row in csv_rows:
         try:
-            key = (int(date_str), float(amount_str), description)
+            key = (int(row.date_str), float(row.amount_str), row.description)
         except ValueError:
             continue
         if key in existing:
             skipped += 1
         else:
-            new_rows.append((card, tx_type, date_str, amount_str, description))
+            new_rows.append(row)
 
     wb = openpyxl.load_workbook(excel_path)
     ws = wb[bank.excel_sheet]
@@ -48,25 +68,25 @@ def _import_bmo(csv_path: str, excel_path: str, bank: BMOConfig) -> str:
         template_row = insert_row - 1
         max_col = ws.max_column
 
-        for i, (card, tx_type, date_str, amount_str, description) in enumerate(new_rows):
+        for i, row in enumerate(new_rows):
             r = insert_row + i
-            amt = float(amount_str)
+            amt = float(row.amount_str)
             last_balance = round(last_balance + amt, 2)
             _copy_row_style(ws, template_row, r, max_col)
-            ws.cell(row=r, column=bank.excel_card).value = card
-            ws.cell(row=r, column=bank.excel_type).value = tx_type
-            ws.cell(row=r, column=bank.excel_date).value = int(date_str)
+            ws.cell(row=r, column=bank.excel_card).value = row.card
+            ws.cell(row=r, column=bank.excel_type).value = row.tx_type
+            ws.cell(row=r, column=bank.excel_date).value = int(row.date_str)
             ws.cell(row=r, column=bank.excel_amount).value = amt
-            ws.cell(row=r, column=bank.excel_desc).value = description
-            ws.cell(row=r, column=bank.excel_dr).value = abs(amt) if tx_type == "CREDIT" else None
-            ws.cell(row=r, column=bank.excel_cr).value = amt if tx_type == "DEBIT" else None
+            ws.cell(row=r, column=bank.excel_desc).value = row.description
+            ws.cell(row=r, column=bank.excel_dr).value = abs(amt) if row.tx_type == "CREDIT" else None
+            ws.cell(row=r, column=bank.excel_cr).value = amt if row.tx_type == "DEBIT" else None
             ws.cell(row=r, column=bank.excel_balance).value = last_balance
 
     wb.save(excel_path)
     return f"Done — {len(new_rows)} row(s) added, {skipped} skipped."
 
 
-def _parse_bmo_csv(csv_path: str, bank: BMOConfig) -> list:
+def _parse_bmo_csv(csv_path: str, bank: BMOConfig) -> list[_BmoRow]:
     rows = []
     header_found = False
     with open(csv_path, newline="", encoding="utf-8-sig") as f:
@@ -78,12 +98,12 @@ def _parse_bmo_csv(csv_path: str, bank: BMOConfig) -> list:
                 continue
             if len(row) < 5 or not row[bank.csv_date].strip():
                 continue
-            rows.append((
-                row[bank.csv_card].strip(),
-                row[bank.csv_type].strip(),
-                row[bank.csv_date].strip(),
-                row[bank.csv_amount].strip(),
-                row[bank.csv_desc].strip(),
+            rows.append(_BmoRow(
+                card=row[bank.csv_card].strip(),
+                tx_type=row[bank.csv_type].strip(),
+                date_str=row[bank.csv_date].strip(),
+                amount_str=row[bank.csv_amount].strip(),
+                description=row[bank.csv_desc].strip(),
             ))
     return rows
 
@@ -116,12 +136,12 @@ def _import_desj(csv_path: str, excel_path: str, bank: DESJConfig) -> str:
     wb_ro.close()
 
     new_rows, skipped = [], 0
-    for account_type, date, code, description, withdrawal, deposit, interest, capital in csv_rows:
-        key = (date, description)
+    for row in csv_rows:
+        key = (row.date, row.description)
         if key in existing:
             skipped += 1
         else:
-            new_rows.append((account_type, date, code, description, withdrawal, deposit, interest, capital))
+            new_rows.append(row)
 
     wb = openpyxl.load_workbook(excel_path)
     ws = wb[bank.excel_sheet]
@@ -129,7 +149,6 @@ def _import_desj(csv_path: str, excel_path: str, bank: DESJConfig) -> str:
     if new_rows:
         insert_row = _find_insert_row(ws, bank.excel_date, bank.excel_data_start_row)
 
-        # Cache the grey fill used on LN1 cash-balance cells, and a blank fill for PCA rows
         grey_fill = _find_grey_fill(ws, bank.excel_data_start_row, insert_row, bank.excel_balance)
         blank_fill = copy(ws.cell(row=bank.excel_data_start_row, column=bank.excel_date).fill)
 
@@ -137,46 +156,43 @@ def _import_desj(csv_path: str, excel_path: str, bank: DESJConfig) -> str:
         template_row = insert_row - 1
         max_col = ws.max_column
 
-        for i, (account_type, date, code, description, withdrawal, deposit, interest, capital) in enumerate(new_rows):
+        for i, row in enumerate(new_rows):
             r = insert_row + i
             _copy_row_style(ws, template_row, r, max_col)
 
-            # Apply correct fill to cash balance cell based on account type
             bal_cell = ws.cell(row=r, column=bank.excel_balance)
-            if account_type == "LN1" and grey_fill:
+            if row.account_type == "LN1" and grey_fill:
                 bal_cell.fill = grey_fill
             else:
                 bal_cell.fill = blank_fill
 
-            ws.cell(row=r, column=bank.excel_date).value = date
-            ws.cell(row=r, column=bank.excel_code).value = code
-            ws.cell(row=r, column=bank.excel_desc).value = description
+            ws.cell(row=r, column=bank.excel_date).value = row.date
+            ws.cell(row=r, column=bank.excel_code).value = row.code
+            ws.cell(row=r, column=bank.excel_desc).value = row.description
 
-            if account_type == "PCA":
-                if withdrawal:
-                    ws.cell(row=r, column=bank.excel_withdrawal).value = withdrawal
-                    last_cash = round(last_cash - withdrawal, 2)
-                if deposit:
-                    ws.cell(row=r, column=bank.excel_deposit).value = deposit
-                    last_cash = round(last_cash + deposit, 2)
+            if row.account_type == "PCA":
+                if row.withdrawal:
+                    ws.cell(row=r, column=bank.excel_withdrawal).value = row.withdrawal
+                    last_cash = round(last_cash - row.withdrawal, 2)
+                if row.deposit:
+                    ws.cell(row=r, column=bank.excel_deposit).value = row.deposit
+                    last_cash = round(last_cash + row.deposit, 2)
                 ws.cell(row=r, column=bank.excel_balance).value = last_cash
 
-            elif account_type == "LN1":
-                if interest:
-                    ws.cell(row=r, column=bank.excel_interest).value = interest
-                if capital:
-                    ws.cell(row=r, column=bank.excel_capital).value = capital
-                    last_mortgage = round(last_mortgage - capital, 2)
+            elif row.account_type == "LN1":
+                if row.interest:
+                    ws.cell(row=r, column=bank.excel_interest).value = row.interest
+                if row.capital:
+                    ws.cell(row=r, column=bank.excel_capital).value = row.capital
+                    last_mortgage = round(last_mortgage - row.capital, 2)
                 ws.cell(row=r, column=bank.excel_mortgage_balance).value = last_mortgage
 
     wb.save(excel_path)
     return f"Done — {len(new_rows)} row(s) added, {skipped} skipped."
 
 
-def _parse_desj_csv(csv_path: str, bank: DESJConfig) -> list:
-    # Expected total columns: capital is the second-to-last field (col 12 → 14 total)
+def _parse_desj_csv(csv_path: str, bank: DESJConfig) -> list[_DESJRow]:
     expected_cols = bank.csv_capital + 2
-    trailing_cols = expected_cols - bank.csv_desc - 1
     rows = []
     with open(csv_path, newline="", encoding="latin-1") as f:
         reader = csv.reader(f)
@@ -197,14 +213,16 @@ def _parse_desj_csv(csv_path: str, bank: DESJConfig) -> list:
                 date = datetime.strptime(row[bank.csv_date].strip(), "%Y/%m/%d")
             except ValueError:
                 continue
-            account_type = row[bank.csv_account_type].strip()
-            code = _to_float(row[bank.csv_code])
-            description = row[bank.csv_desc].strip()
-            withdrawal = _to_float(row[bank.csv_withdrawal])
-            deposit = _to_float(row[bank.csv_deposit])
-            interest = _to_float(row[bank.csv_interest])
-            capital = _to_float(row[bank.csv_capital]) if len(row) > bank.csv_capital else None
-            rows.append((account_type, date, code, description, withdrawal, deposit, interest, capital))
+            rows.append(_DESJRow(
+                account_type=row[bank.csv_account_type].strip(),
+                date=date,
+                code=_to_float(row[bank.csv_code]),
+                description=row[bank.csv_desc].strip(),
+                withdrawal=_to_float(row[bank.csv_withdrawal]),
+                deposit=_to_float(row[bank.csv_deposit]),
+                interest=_to_float(row[bank.csv_interest]),
+                capital=_to_float(row[bank.csv_capital]) if len(row) > bank.csv_capital else None,
+            ))
     return rows
 
 
@@ -221,10 +239,10 @@ def _desj_duplicate_set(ws, insert_row: int, bank: DESJConfig) -> set:
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
 def _find_insert_row(ws, date_col: int, data_start_row: int) -> int:
-    for row in range(data_start_row, ws.max_row + 2):
+    end = max(ws.max_row, data_start_row) + 2
+    for row in range(data_start_row, end):
         if ws.cell(row=row, column=date_col).value is None:
             return row
-    return data_start_row
 
 
 def _copy_row_style(ws, src_row: int, dst_row: int, max_col: int) -> None:
@@ -239,39 +257,29 @@ def _copy_row_style(ws, src_row: int, dst_row: int, max_col: int) -> None:
             dst.number_format = src.number_format
 
 
-def _get_balance_simple(ws, last_row: int, data_start_row: int, balance_col: int) -> float:
-    for row in range(last_row, data_start_row - 1, -1):
+def _scan_for_balance(ws, from_row: int, to_row: int, balance_col: int) -> float | None:
+    for row in range(from_row, to_row - 1, -1):
         val = ws.cell(row=row, column=balance_col).value
         if val is not None:
             try:
                 return float(val)
             except (ValueError, TypeError):
                 continue
-    return 0.0
+    return None
+
+
+def _get_balance_simple(ws, last_row: int, data_start_row: int, balance_col: int) -> float:
+    return _scan_for_balance(ws, last_row, data_start_row, balance_col) or 0.0
 
 
 def _get_last_balance(ws, last_row: int, data_start_row: int,
                       balance_col: int, dr_col: int, cr_col: int) -> float:
-    # Try cached formula values first
-    for row in range(last_row, data_start_row - 1, -1):
-        val = ws.cell(row=row, column=balance_col).value
-        if val is not None:
-            try:
-                return float(val)
-            except (ValueError, TypeError):
-                continue
+    cached = _scan_for_balance(ws, last_row, data_start_row, balance_col)
+    if cached is not None:
+        return cached
 
     # Formulas not cached — compute from opening balance + all DR/CR
-    opening = 0.0
-    for row in range(data_start_row - 1, 0, -1):
-        val = ws.cell(row=row, column=balance_col).value
-        if val is not None:
-            try:
-                opening = float(val)
-                break
-            except (ValueError, TypeError):
-                continue
-
+    opening = _scan_for_balance(ws, data_start_row - 1, 1, balance_col) or 0.0
     balance = opening
     for row in range(data_start_row, last_row + 1):
         for col in (dr_col, cr_col):
