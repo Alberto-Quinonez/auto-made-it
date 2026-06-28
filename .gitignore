@@ -12,10 +12,16 @@ dist/
 build/
 *.egg-info/
 
+# Assets
+logo.png
+
 # Excel / data files
 *.xlsx
 *.xls
 *.csv
+
+# Test files
+*_TEST.csv
 
 # OS
 .DS_Store
