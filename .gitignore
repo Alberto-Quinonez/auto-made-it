@@ -13,7 +13,7 @@ build/
 *.egg-info/
 
 # Assets
-logo.png
+*.png
 
 # Excel / data files
 *.xlsx
@@ -31,3 +31,4 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+.history/
